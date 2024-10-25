@@ -81,6 +81,10 @@ class GdiStarterKitStack(Stack):
             string_value=instance.instance_id,
         )
 
+        # To request a certificate that gets automatically approved based on DNS
+        # (i.e. proof that we own the domain), look up the current HostedZone and
+        # reference it in the from_dns() validation call when creating the cert:
+
         # Route 53 Hosted Zone
         hosted_zone = route53.HostedZone.from_lookup(
             self, "HostedZone", domain_name=HOSTED_ZONE

@@ -4,12 +4,11 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_iam as iam,
     aws_ssm as ssm,
-    aws_elasticloadbalancing as elb,
+    aws_elasticloadbalancingv2 as elbv2,
+    aws_elasticloadbalancingv2_targets as elbv2_targets,
     aws_certificatemanager as acm,
     aws_route53 as route53,
     aws_route53_targets as targets,
-    aws_s3_assets as assets,
-    Size,
     Stack,
 )
 from constructs import Construct
@@ -18,7 +17,6 @@ EC2_ITYPE: str = "t2.medium"
 EBS_GB: int = 100
 REMS_LISTEN: int = 3000
 HOSTED_ZONE: str = "test.biocommons.org.au"
-S3_ASSETS: str = "hgi-rems-assets"
 REMS_DOMAIN: str = f"rems.{HOSTED_ZONE}"
 
 
@@ -30,19 +28,28 @@ class GdiStarterKitStack(Stack):
         # VPC
         vpc = ec2.Vpc(self, "VPC", max_azs=2, nat_gateways=1)
 
-        # Security Group for EC2
-        ec2_security_group = ec2.SecurityGroup(
+        # Security group for ALB
+        alb_sg = ec2.SecurityGroup(
             self,
-            "EC2SecurityGroup",
+            "AlbSecurityGroup",
             vpc=vpc,
-            security_group_name="rems-ec2-sg",
-            description=f"Allow traffic on port {REMS_LISTEN}",
+            description="Allow HTTPS access to ALB",
             allow_all_outbound=True,
         )
-        ec2_security_group.add_ingress_rule(
-            ec2.Peer.any_ipv4(),
+        alb_sg.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(443), "Allow HTTPS")
+
+        # Security group for EC2 instance
+        ec2_sg = ec2.SecurityGroup(
+            self,
+            "Ec2SecurityGroup",
+            vpc=vpc,
+            description=f"Allow traffic from ALB on port {REMS_LISTEN}",
+            allow_all_outbound=True,
+        )
+        ec2_sg.add_ingress_rule(
+            alb_sg,
             ec2.Port.tcp(REMS_LISTEN),
-            f"Allow traffic on port {REMS_LISTEN}",
+            f"Allow ALB to access EC2 on port {REMS_LISTEN}",
         )
 
         # IAM Role for SSM
@@ -64,7 +71,7 @@ class GdiStarterKitStack(Stack):
             instance_type=ec2.InstanceType(EC2_ITYPE),
             machine_image=ec2.MachineImage.latest_amazon_linux2023(),
             vpc=vpc,
-            security_group=ec2_security_group,
+            security_group=ec2_sg,
             role=role,
             block_devices=[
                 ec2.BlockDevice(
@@ -90,45 +97,54 @@ class GdiStarterKitStack(Stack):
             self, "HostedZone", domain_name=HOSTED_ZONE
         )
 
-        # TLS certificate
-        certificate = acm.Certificate(
+        # TLS certificate for the subdomain
+        rems_cert = acm.Certificate(
             self,
-            "TLSCertificate",
+            "RemsTLSCertificate",
             domain_name=REMS_DOMAIN,
             validation=acm.CertificateValidation.from_dns(hosted_zone),
         )
 
-        # Classic Load Balancer
-        # We use a load balancer — even though we've only got a single EC2
-        # instance behind it — for the convenience of being able to attach
-        # our ACM-issued TLS certificate here instead of having to deploy
-        # it manually on instances. And we use a Classic LB because the
-        # latest Application LBs require you to have the extra layer of
-        # an AutoScaling group as the target rather than bare instances.
-        load_balancer = elb.LoadBalancer(
-            self,
-            "RemsELB",
-            vpc=vpc,
-            internet_facing=True,
-            health_check=elb.HealthCheck(port=REMS_LISTEN),
-            listeners=[
-                elb.LoadBalancerListener(external_port=80, internal_port=REMS_LISTEN),
-                elb.LoadBalancerListener(
-                    external_port=443,
-                    internal_port=REMS_LISTEN,
-                    ssl_certificate_arn=certificate.certificate_arn,
-                ),
-            ],
+        # Application Load Balancer
+        alb = elbv2.ApplicationLoadBalancer(
+            self, "GDI-ALB", vpc=vpc, internet_facing=True, security_group=alb_sg
         )
-        load_balancer.add_target(elb.InstanceTarget(instance))
+
+        # Add an HTTPS listener for TLS traffic
+        listener = alb.add_listener(
+            "HttpsListener", port=443, certificates=[rems_cert], open=True
+        )
+
+        # Create a target group for REMS
+        atg_rems = elbv2.ApplicationTargetGroup(
+            self,
+            "RemsTargetGroup",
+            vpc=vpc,
+            port=REMS_LISTEN,
+            protocol=elbv2.ApplicationProtocol.HTTP,
+            targets=[
+                elbv2_targets.InstanceIdTarget(instance.instance_id, port=REMS_LISTEN)
+            ],
+            health_check=elbv2.HealthCheck(port=f"{REMS_LISTEN}"),
+        )
+
+        # Add a default action (target group) to the listener
+        listener.add_target_groups("DefaultTargetGroup",
+                                   target_groups=[atg_rems])
+
+        # Add a routing rule for the domain
+        listener.add_target_groups(
+            "RemsDomainRule",
+            priority=1,
+            conditions=[elbv2.ListenerCondition.host_headers([REMS_DOMAIN])],
+            target_groups=[atg_rems],
+        )
 
         # Route 53 A Record for the Load Balancer
         route53.ARecord(
             self,
-            "AliasRecord",
+            "RemsAliasRecord",
             zone=hosted_zone,
-            target=route53.RecordTarget.from_alias(
-                targets.ClassicLoadBalancerTarget(load_balancer)
-            ),
             record_name=REMS_DOMAIN,
+            target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(alb)),
         )

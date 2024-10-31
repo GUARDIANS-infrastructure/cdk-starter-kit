@@ -9,6 +9,7 @@ from aws_cdk import (
     aws_certificatemanager as acm,
     aws_route53 as route53,
     aws_route53_targets as targets,
+    aws_s3_assets as assets,
     Stack,
 )
 from constructs import Construct
@@ -80,6 +81,20 @@ class GdiStarterKitStack(Stack):
             ],
         )
 
+        # Software stack setup in S3 as Assets
+        ec2_config = assets.Asset(
+            self,
+            "ec2_config.sh",
+            path=os.path.join(os.path.dirname(__file__), "ec2_config.sh"),
+        )
+        ec2_config_path = instance.user_data.add_s3_download_command(
+            bucket=ec2_config.bucket, bucket_key=ec2_config.s3_object_key
+        )
+
+        # Execute configure script from S3
+        instance.user_data.add_execute_file_command(file_path=ec2_config_path)
+        ec2_config.grant_read(instance.role)
+
         # SSM Parameter to store instance ID
         ssm.StringParameter(
             self,
@@ -129,8 +144,7 @@ class GdiStarterKitStack(Stack):
         )
 
         # Add a default action (target group) to the listener
-        listener.add_target_groups("DefaultTargetGroup",
-                                   target_groups=[atg_rems])
+        listener.add_target_groups("DefaultTargetGroup", target_groups=[atg_rems])
 
         # Add a routing rule for the domain
         listener.add_target_groups(

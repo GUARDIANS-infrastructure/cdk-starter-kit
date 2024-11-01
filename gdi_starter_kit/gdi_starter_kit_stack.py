@@ -117,7 +117,7 @@ class GdiStarterKitStack(Stack):
             self,
             "RemsPublicURL",
             parameter_name="/Rems/PublicURL",
-            string_value=f"https://{REMS_DOMAIN}",
+            string_value=f"https://{REMS_DOMAIN}/", # <- requires trailing slash
         )
 
         # To request a certificate that gets automatically approved based on DNS

@@ -10,6 +10,7 @@ from aws_cdk import (
     aws_route53 as route53,
     aws_route53_targets as targets,
     aws_s3_assets as assets,
+    aws_secretsmanager as secretsmanager,
     Stack,
 )
 from constructs import Construct
@@ -25,6 +26,14 @@ class GdiStarterKitStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # Secrets in AWS Secrets Manager
+        db_sec = secretsmanager.Secret.from_secret_name_v2(
+            self, "db_sec", "starter-kit-rems.db"
+        )
+        oidc_sec = secretsmanager.Secret.from_secret_name_v2(
+            self, "oidc_sec", "LSLogin.starter-kit-rems.oidc"
+        )
 
         # VPC
         vpc = ec2.Vpc(self, "VPC", max_azs=2, nat_gateways=1)
@@ -53,7 +62,7 @@ class GdiStarterKitStack(Stack):
             f"Allow ALB to access EC2 on port {REMS_LISTEN}",
         )
 
-        # IAM Role for SSM
+        # IAM Role with Systems Manager policy
         role = iam.Role(
             self,
             "RemsInstanceSSM",
@@ -64,6 +73,8 @@ class GdiStarterKitStack(Stack):
                 "AmazonSSMManagedInstanceCore"
             )
         )
+        db_sec.grant_read(role)
+        oidc_sec.grant_read(role)
 
         # EC2 Instance
         instance = ec2.Instance(
@@ -95,12 +106,18 @@ class GdiStarterKitStack(Stack):
         instance.user_data.add_execute_file_command(file_path=ec2_config_path)
         ec2_config.grant_read(instance.role)
 
-        # SSM Parameter to store instance ID
+        # SSM Parameters
         ssm.StringParameter(
             self,
             "RemsInstanceId",
             parameter_name="/Rems/InstanceId",
             string_value=instance.instance_id,
+        )
+        ssm.StringParameter(
+            self,
+            "RemsPublicURL",
+            parameter_name="/Rems/PublicURL",
+            string_value=f"https://{REMS_DOMAIN}",
         )
 
         # To request a certificate that gets automatically approved based on DNS

@@ -1,58 +1,42 @@
+This is an AWS CDK project to deploy components of the [GDI starter kit](
+https://gdi.onemilliongenomes.eu/gdi-starter-kit.html) to AWS.
 
-# Welcome to your CDK Python project!
+## Goal
 
-This is a blank project for CDK development with Python.
+The end goal is to be able to run `cdk deploy GdiStarterKitStack` and have all
+all the services up and running. 
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+## Status
 
-This project is set up like a standard Python project.  The initialization
-process also creates a virtualenv within this project, stored under the `.venv`
-directory.  To create the virtualenv it assumes that there is a `python3`
-(or `python` for Windows) executable in your path with access to the `venv`
-package. If for any reason the automatic creation of the virtualenv fails,
-you can create the virtualenv manually.
+Currently, the following services are deployed:
+ * REMS
 
-To manually create a virtualenv on MacOS and Linux:
+## Prerequisites
 
-```
-$ python3 -m venv .venv
-```
+* AWS CDK v2 for Python installed locally
+* An AWS account with permissions to create resources
+* An OIDC Provider (OP) — for example [LS-AAI](
+  https://services.aai.lifescience-ri.eu/spreg/) or [Google Identity](
+  https://console.cloud.google.com/apis/credentials) — configured with your
+  service endpoints as RPs. You generally need to specify at least:
+  * login URL
+  * redirect URL
+  * oAuth flow (e.g. PKCE)
+  * scopes
+  and take note of the generated `client-id` and `client-secret`
 
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
+## Post-deployment
 
-```
-$ source .venv/bin/activate
-```
+### REMS
 
-If you are a Windows platform, you would activate the virtualenv like this:
+Follow the steps documented [here](
+https://github.com/GenomicDataInfrastructure/starter-kit-rems?tab=readme-ov-file#using-rems) to demo:
 
-```
-% .venv\Scripts\activate.bat
-```
+* Adding yourself as an Owner
+* Creating API key and using it to update the application, e.g.:
+* Adding test data
+* Creating a robot user
+* Getting GA4GH visas from the API (use https://jwt.io/ to inspect the returned JWT)
 
-Once the virtualenv is activated, you can install the required dependencies.
+Follow the steps documented [here](https://github.com/CSCfi/rems/blob/master/manual/owner.md#how-to-add-resources-to-rems) to configure the application with your own Forms, Workflows, Resources etc.
 
-```
-$ pip install -r requirements.txt
-```
-
-At this point you can now synthesize the CloudFormation template for this code.
-
-```
-$ cdk synth
-```
-
-To add additional dependencies, for example other CDK libraries, just add
-them to your `setup.py` file and rerun the `pip install -r requirements.txt`
-command.
-
-## Useful commands
-
- * `cdk ls`          list all stacks in the app
- * `cdk synth`       emits the synthesized CloudFormation template
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk docs`        open CDK documentation
-
-Enjoy!

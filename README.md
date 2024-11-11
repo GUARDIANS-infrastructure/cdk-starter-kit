@@ -13,8 +13,8 @@ Currently, the following services are deployed:
 
 ## Prerequisites
 
-* AWS CDK v2 for Python installed locally
-* An AWS account with permissions to create resources
+### AAI
+
 * An OIDC Provider (OP) — for example [LS-AAI](
   https://services.aai.lifescience-ri.eu/spreg/) or [Google Identity](
   https://console.cloud.google.com/apis/credentials) — configured with your
@@ -24,6 +24,28 @@ Currently, the following services are deployed:
   * oAuth flow (e.g. PKCE)
   * scopes
   and take note of the generated `client-id` and `client-secret`
+
+### AWS
+
+* An AWS account with permissions to create resources
+* An AWS Secrets Manager entry (type: other) describing the REMS OIDC RP config
+  with 3 key-vals:
+  - 'oidc-metadata-url'
+  - 'oidc-client-id'
+  - 'oidc-client-secret'
+* An AWS Route 53 Hosted Zone record configured with your domain e.g. `my.org`
+
+### Local CDK config
+
+* AWS CDK v2 for Python installed
+* The CDK `rems_oidc_sec_name` context variable set to the name of the Secrets
+  Manager record containing the RP config
+* The `hz_domain` context variable set to the HZ domain you want to deploy to
+  e.g. `my.org`
+* (optionally) the `rems_domain_prefix` context variable set to the domain
+  prefix to generate the deployed public URL (login URL as configured in the
+  OP). If not supplied this defaults to `rems` — e.g. the public URL will be
+  `rems.my.org`
 
 ## Post-deployment
 

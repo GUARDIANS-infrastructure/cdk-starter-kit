@@ -18,8 +18,6 @@ from constructs import Construct
 EC2_ITYPE: str = "t2.medium"
 EBS_GB: int = 100
 REMS_LISTEN: int = 3000
-HOSTED_ZONE: str = "test.biocommons.org.au"
-REMS_DOMAIN: str = f"rems.{HOSTED_ZONE}"
 
 
 class GdiStarterKitStack(Stack):
@@ -27,12 +25,38 @@ class GdiStarterKitStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Secrets in AWS Secrets Manager
-        db_sec = secretsmanager.Secret.from_secret_name_v2(
-            self, "db_sec", "starter-kit-rems.db"
+        # get runtime context - this can be specified in various places
+        # https://docs.aws.amazon.com/cdk/v2/guide/context.html#context_construct
+        # e.g.
+        # * cdk deploy --context key=value
+        # * in the context key of the project cdk.json file
+        # * in the context key of the ~/.cdk.json file
+
+        # Domain of a hosted zone you own and want to deploy to
+        hz_domain = self.node.get_context("hz_domain")
+        # Name of the secret in AWS Secrets Manager that stores OIDC RP config
+        rems_oidc_sec_name = self.node.get_context("rems_oidc_sec_name")
+        # Domain component to prefix to hz_domain to generate the public URL
+        rems_domain_prefix = self.node.try_get_context("rems_domain_prefix") or "rems"
+        rems_domain = f"{rems_domain_prefix}.{hz_domain}"
+
+        # Set SSM Parameters
+        ssm.StringParameter(
+            self,
+            "RemsOidcSecName",
+            parameter_name="/Rems/OidcSecName",
+            string_value=rems_oidc_sec_name,
         )
+        ssm.StringParameter(
+            self,
+            "RemsPublicURL",
+            parameter_name="/Rems/PublicURL",
+            string_value=f"https://{rems_domain}/",  # <- requires trailing slash
+        )
+
+        # Secrets in AWS Secrets Manager
         oidc_sec = secretsmanager.Secret.from_secret_name_v2(
-            self, "oidc_sec", "LSLogin.starter-kit-rems.oidc"
+            self, "oidc_sec", rems_oidc_sec_name
         )
 
         # VPC
@@ -73,7 +97,6 @@ class GdiStarterKitStack(Stack):
                 "AmazonSSMManagedInstanceCore"
             )
         )
-        db_sec.grant_read(role)
         oidc_sec.grant_read(role)
 
         # EC2 Instance
@@ -106,34 +129,20 @@ class GdiStarterKitStack(Stack):
         instance.user_data.add_execute_file_command(file_path=ec2_config_path)
         ec2_config.grant_read(instance.role)
 
-        # SSM Parameters
-        ssm.StringParameter(
-            self,
-            "RemsInstanceId",
-            parameter_name="/Rems/InstanceId",
-            string_value=instance.instance_id,
-        )
-        ssm.StringParameter(
-            self,
-            "RemsPublicURL",
-            parameter_name="/Rems/PublicURL",
-            string_value=f"https://{REMS_DOMAIN}/", # <- requires trailing slash
-        )
-
         # To request a certificate that gets automatically approved based on DNS
         # (i.e. proof that we own the domain), look up the current HostedZone and
         # reference it in the from_dns() validation call when creating the cert:
 
         # Route 53 Hosted Zone
         hosted_zone = route53.HostedZone.from_lookup(
-            self, "HostedZone", domain_name=HOSTED_ZONE
+            self, "HostedZone", domain_name=hz_domain
         )
 
         # TLS certificate for the subdomain
         rems_cert = acm.Certificate(
             self,
             "RemsTLSCertificate",
-            domain_name=REMS_DOMAIN,
+            domain_name=rems_domain,
             validation=acm.CertificateValidation.from_dns(hosted_zone),
         )
 
@@ -167,7 +176,7 @@ class GdiStarterKitStack(Stack):
         listener.add_target_groups(
             "RemsDomainRule",
             priority=1,
-            conditions=[elbv2.ListenerCondition.host_headers([REMS_DOMAIN])],
+            conditions=[elbv2.ListenerCondition.host_headers([rems_domain])],
             target_groups=[atg_rems],
         )
 
@@ -176,6 +185,6 @@ class GdiStarterKitStack(Stack):
             self,
             "RemsAliasRecord",
             zone=hosted_zone,
-            record_name=REMS_DOMAIN,
+            record_name=rems_domain,
             target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(alb)),
         )

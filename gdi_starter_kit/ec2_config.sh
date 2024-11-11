@@ -22,18 +22,23 @@ cd starter-kit-rems/
 python3 generate_jwks.py
 
 # Configuration requires:
-# 1. '/Rems/PublicURL' SSM parameter set in the CDK script
-# 2. AWS Secrets Manager entry (type: other) named 'LSLogin.starter-kit-rems.oid' with 3 key-vals: 'oidc-metadata-url', 'oidc-client-id', 'oidc-client-secret'.
+# 1. '/Rems/PublicURL' SSM parameter (set in the CDK script)
+# 2. '/Rems/OidcSecName' SSM parameter (set in CDK script)
+# 3. The named AWS Secrets Manager entry (type: other) with 3 key-vals:
+# - 'oidc-metadata-url'
+# - 'oidc-client-id'
+# - 'oidc-client-secret'.
 
 # fetch secrets and other deployment config; set as env vars.
-export PUBLIC_URL=$(aws ssm get-parameter --name "/Rems/PublicURL" --query Parameter.Value --output text)
+oidc_sec_name=$(aws ssm get-parameter --name "/Rems/OidcSecName" --query Parameter.Value --output text)
+oidc_config=$(aws secretsmanager get-secret-value --secret-id $oidc_sec_name --query SecretString --output text | jq .)
+export OIDC_METADATA_URL=$(jq -r '."oidc-metadata-url"' <<< $oidc_config)
+export OIDC_CLIENT_ID=$(jq -r '."oidc-client-id"' <<< $oidc_config)
+export OIDC_CLIENT_SECRET=$(jq -r '."oidc-client-secret"' <<< $oidc_config)
 export DB_NAME=remsdb
 export DB_USER=rems
 export DB_PASSWORD=$(pwgen)
-OIDC_CONFIG=$(aws secretsmanager get-secret-value --secret-id LSLogin.starter-kit-rems.oidc --query SecretString --output text | jq .)
-export OIDC_METADATA_URL=$(jq -r '."oidc-metadata-url"' <<< $OIDC_CONFIG)
-export OIDC_CLIENT_ID=$(jq -r '."oidc-client-id"' <<< $OIDC_CONFIG)
-export OIDC_CLIENT_SECRET=$(jq -r '."oidc-client-secret"' <<< $OIDC_CONFIG)
+export PUBLIC_URL=$(aws ssm get-parameter --name "/Rems/PublicURL" --query Parameter.Value --output text)
 
 # configure the application
 for cfgfile in config.edn docker-compose.yml; do

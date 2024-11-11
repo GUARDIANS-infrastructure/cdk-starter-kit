@@ -29,6 +29,8 @@ Currently, the following services are deployed:
 
 ### REMS
 
+The application is primarily [configured](https://github.com/CSCfi/rems/blob/master/docs/configuration.md) via the `config.edn` file.
+
 Follow the steps documented [here](
 https://github.com/GenomicDataInfrastructure/starter-kit-rems?tab=readme-ov-file#using-rems) to demo:
 

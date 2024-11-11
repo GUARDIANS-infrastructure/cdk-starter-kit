@@ -1,8 +1,8 @@
 #!/bin/sh
 
-# install git, docker, docker-compose
+# install necessaries
 dnf update -y
-dnf install -y git docker
+dnf install -y git docker pwgen
 systemctl enable docker
 systemctl start docker
 curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
@@ -23,15 +23,13 @@ python3 generate_jwks.py
 
 # Configuration requires:
 # 1. '/Rems/PublicURL' SSM parameter set in the CDK script
-# 2. AWS Secrets Manager entry (type: postgres) named 'starter-kit-rems.db'
-# 3. AWS Secrets Manager entry (type: other) named 'LSLogin.starter-kit-rems.oid' with 3 key-vals: 'oidc-metadata-url', 'oidc-client-id', 'oidc-client-secret'.
+# 2. AWS Secrets Manager entry (type: other) named 'LSLogin.starter-kit-rems.oid' with 3 key-vals: 'oidc-metadata-url', 'oidc-client-id', 'oidc-client-secret'.
 
 # fetch secrets and other deployment config; set as env vars.
 export PUBLIC_URL=$(aws ssm get-parameter --name "/Rems/PublicURL" --query Parameter.Value --output text)
-DB_CONFIG=$(aws secretsmanager get-secret-value --secret-id starter-kit-rems.db --query SecretString --output text | jq .)
-export DB_NAME=$(jq -r ."dbname" <<< $DB_CONFIG)
-export DB_USER=$(jq -r ."username" <<< $DB_CONFIG)
-export DB_PASSWORD=$(jq -r ."password" <<< $DB_CONFIG)
+export DB_NAME=remsdb
+export DB_USER=rems
+export DB_PASSWORD=$(pwgen)
 OIDC_CONFIG=$(aws secretsmanager get-secret-value --secret-id LSLogin.starter-kit-rems.oidc --query SecretString --output text | jq .)
 export OIDC_METADATA_URL=$(jq -r '."oidc-metadata-url"' <<< $OIDC_CONFIG)
 export OIDC_CLIENT_ID=$(jq -r '."oidc-client-id"' <<< $OIDC_CONFIG)

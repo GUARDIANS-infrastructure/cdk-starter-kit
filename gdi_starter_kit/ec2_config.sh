@@ -15,7 +15,7 @@ pip install authlib
 
 # clone the REMS repo
 cd /opt
-git clone https://github.com/delocalizer/starter-kit-rems
+git clone https://github.com/GUARDIANS-infrastructure/starter-kit-rems
 cd starter-kit-rems/
 
 # generate keys

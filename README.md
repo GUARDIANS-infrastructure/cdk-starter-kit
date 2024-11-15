@@ -1,10 +1,13 @@
-This is an AWS CDK project to deploy components of the [GDI starter kit](
+This is a CDK (python) project to deploy components of the [GDI starter kit](
 https://gdi.onemilliongenomes.eu/gdi-starter-kit.html) to AWS.
 
 ## Goal
 
-The end goal is to be able to run `cdk deploy GdiStarterKitStack` and have all
-all the services up and running. 
+This project aims to capture as much configuration as possible in the
+pre-deployment phase, making services operational after simply running:
+```
+cdk deploy GdiStarterKitStack
+``` 
 
 ## Status
 
@@ -23,22 +26,21 @@ Currently, the following services are deployed:
   * redirect URL
   * oAuth flow (e.g. PKCE)
   * scopes
-  and take note of the generated `client-id` and `client-secret`
+  and note the generated `client-id` and `client-secret`
 
 ### AWS
 
 * An AWS account with permissions to create resources
+* An AWS Route 53 Hosted Zone record configured with your domain e.g. `my.org`
 * An AWS Secrets Manager entry (type: other) describing the REMS OIDC RP config
   with 3 key-vals:
   - 'oidc-metadata-url'
   - 'oidc-client-id'
   - 'oidc-client-secret'
-* An AWS Route 53 Hosted Zone record configured with your domain e.g. `my.org`
 
-### Local CDK config
+## Configuration
 
-* AWS CDK v2 for Python installed
-* The CDK `rems_oidc_sec_name` context variable set to the name of the Secrets
+* The `rems_oidc_sec_name` CDK context variable set to the name of the Secrets
   Manager record containing the RP config
 * The `hz_domain` context variable set to the HZ domain you want to deploy to
   e.g. `my.org`

@@ -9,7 +9,6 @@ from aws_cdk import (
     aws_certificatemanager as acm,
     aws_route53 as route53,
     aws_route53_targets as targets,
-    aws_s3_assets as assets,
     aws_secretsmanager as secretsmanager,
     Stack,
 )
@@ -39,22 +38,17 @@ class GdiStarterKitStack(Stack):
         # Domain component to prefix to hz_domain to generate the public URL
         rems_domain_prefix = self.node.try_get_context("rems_domain_prefix") or "rems"
         rems_domain = f"{rems_domain_prefix}.{hz_domain}"
+        rems_url = f"https://{rems_domain}/"  # <- requires trailing slash
 
-        # Set SSM Parameters
-        ssm.StringParameter(
+        # SSM Parameters
+        param_rems_oidc_sec_name = ssm.StringParameter(
             self,
             "RemsOidcSecName",
             parameter_name="/Rems/OidcSecName",
             string_value=rems_oidc_sec_name,
         )
-        ssm.StringParameter(
-            self,
-            "RemsPublicURL",
-            parameter_name="/Rems/PublicURL",
-            string_value=f"https://{rems_domain}/",  # <- requires trailing slash
-        )
 
-        # Secrets in AWS Secrets Manager
+        # AWS Secrets Manager Secrets
         oidc_sec = secretsmanager.Secret.from_secret_name_v2(
             self, "oidc_sec", rems_oidc_sec_name
         )
@@ -106,6 +100,9 @@ class GdiStarterKitStack(Stack):
             instance_type=ec2.InstanceType(EC2_ITYPE),
             machine_image=ec2.MachineImage.latest_amazon_linux2023(),
             vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
+            ),
             security_group=ec2_sg,
             role=role,
             block_devices=[
@@ -113,21 +110,10 @@ class GdiStarterKitStack(Stack):
                     device_name="/dev/xvda", volume=ec2.BlockDeviceVolume.ebs(EBS_GB)
                 )
             ],
+            user_data=config_rems_host(
+                param_rems_oidc_sec_name.parameter_name, rems_url
+            ),
         )
-
-        # Software stack setup in S3 as Assets
-        ec2_config = assets.Asset(
-            self,
-            "ec2_config.sh",
-            path=os.path.join(os.path.dirname(__file__), "ec2_config.sh"),
-        )
-        ec2_config_path = instance.user_data.add_s3_download_command(
-            bucket=ec2_config.bucket, bucket_key=ec2_config.s3_object_key
-        )
-
-        # Execute configure script from S3
-        instance.user_data.add_execute_file_command(file_path=ec2_config_path)
-        ec2_config.grant_read(instance.role)
 
         # To request a certificate that gets automatically approved based on DNS
         # (i.e. proof that we own the domain), look up the current HostedZone and
@@ -188,3 +174,57 @@ class GdiStarterKitStack(Stack):
             record_name=rems_domain,
             target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(alb)),
         )
+
+
+def config_rems_host(param_rems_oidc_sec_name: str, rems_url: str) -> ec2.UserData:
+    """
+    As a prerequisite, the named AWS Secrets Manager entry (type: other) must
+    exist and be configured with 3 key-value pairs:
+        - 'oidc-metadata-url'
+        - 'oidc-client-id'
+        - 'oidc-client-secret'
+    Passing only the secret name to the instance via SSM is for security.
+    This is a bit clunky but avoids unwrapping secrets at CDK synthesis time.
+    """
+    user_data = ec2.UserData.for_linux()
+    user_data.add_commands(
+        # install necessaries
+        r"""dnf update -y""",
+        r"""dnf install -y git docker pwgen""",
+        r"""systemctl enable docker""",
+        r"""systemctl start docker""",
+        r"""curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose""",
+        r"""chmod +x /usr/local/bin/docker-compose""",
+        # install authlib for generate_jwks.py
+        r"""curl -O https://bootstrap.pypa.io/get-pip.py""",
+        r"""python3 get-pip.py""",
+        r"""pip install authlib""",
+        # clone the REMS repo
+        r"""cd /opt""",
+        r"""git clone https://github.com/GUARDIANS-infrastructure/starter-kit-rems""",
+        r"""cd starter-kit-rems/""",
+        # generate keys
+        r"""python3 generate_jwks.py""",
+        # fetch secrets and other deployment config; set as env vars.
+        rf"""oidc_sec_name=$(aws ssm get-parameter --name "{param_rems_oidc_sec_name}" --query Parameter.Value --output text)""",
+        r"oidc_config=$(aws secretsmanager get-secret-value --secret-id $oidc_sec_name --query SecretString --output text | jq .)",
+        r"""export OIDC_METADATA_URL=$(jq -r '."oidc-metadata-url"' <<< $oidc_config)""",
+        r"""export OIDC_CLIENT_ID=$(jq -r '."oidc-client-id"' <<< $oidc_config)""",
+        r"""export OIDC_CLIENT_SECRET=$(jq -r '."oidc-client-secret"' <<< $oidc_config)""",
+        r"""export DB_NAME=remsdb""",
+        r"""export DB_USER=rems""",
+        r"""export DB_PASSWORD=$(pwgen)""",
+        rf"""export PUBLIC_URL={rems_url}""",
+        # configure the application
+        r"""for cfgfile in config.edn docker-compose.yml; do""",
+        r"""	tmpfile=$(mktemp)""",
+        r"""	\cp -f --preserve=all --attributes-only $cfgfile $tmpfile""",
+        r"""	envsubst < $cfgfile > $tmpfile""",
+        r"""	\mv -f $tmpfile $cfgfile""",
+        r"""done""",
+        # start the first time
+        r"""docker-compose up -d db""",
+        r"""docker-compose run --rm -e CMD="migrate" app""",
+        r"""docker-compose up -d app""",
+    )
+    return user_data
